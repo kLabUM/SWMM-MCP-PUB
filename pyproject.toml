@@ -1,0 +1,14 @@
+[project]
+name = "swmm-mcp"
+version = "0.1.0"
+description = "MCP server for interacting with SWMM models"
+readme = "README.md"
+requires-python = "~=3.12"
+dependencies = [
+    "asyncio>=4.0.0",
+    "dash>=3.2.0",
+    "fastmcp>=2.11.2",
+    "plotly>=6.3.0",
+    "pyswmm>=2.0.1",
+    "swmm-api[macros]>=0.4.69",
+]
