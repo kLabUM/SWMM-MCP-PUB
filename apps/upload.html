@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark">
+    <style>
+        body {
+            width: 100vw;
+            height: 220px;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: rgb(245, 244, 237);
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #666;
+            background-color: rgba(200, 200, 200, 0.1);
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: rgba(0, 123, 255, 0.1);
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        #status.success {
+            display: block;
+            background-color: rgba(40, 167, 69, 0.1);
+            border: 1px solid #28a745;
+            color: #28a745;
+        }
+        #status.error {
+            display: block;
+            background-color: rgba(220, 53, 69, 0.1);
+            border: 1px solid #dc3545;
+            color: #dc3545;
+        }
+        #status.info {
+            display: block;
+            background-color: rgba(0, 123, 255, 0.1);
+            border: 1px solid #007bff;
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="upload-area" id="uploadArea">
+            <p style="font-size: 16px; color: #222222;">Click to select a .inp file or drag and drop</p>
+        </div>
+        <input type="file" id="fileInput" accept=".inp" />
+        <div id="status"></div>
+    </div>
+
+    <script type="module">
+        import { App } from "https://unpkg.com/@modelcontextprotocol/ext-apps@0.4.0/app-with-deps";
+
+        const app = new App({ name: "SWMM Model Upload", version: "1.0.0" });
+        const body = document.body;
+        const uploadArea = document.getElementById("uploadArea");
+        const fileInput = document.getElementById("fileInput");
+        const statusEl = document.getElementById("status");
+
+        function showStatus(message, type) {
+            statusEl.textContent = message;
+            statusEl.className = type;
+        }
+
+        function handleFile(file) {
+            if (!file) return;
+
+            if (!file.name.endsWith('.inp')) {
+                showStatus("Error: Only .inp files are accepted", "error");
+                return;
+            }
+
+            showStatus("Uploading model...", "info");
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const content = e.target.result;
+                const modelName = file.name.replace('.inp', '');
+
+                try {
+                    const result = await app.callServerTool({
+                        name: "upload_model",
+                        arguments: {
+                            model_name: modelName,
+                            content: content
+                        }
+                    });
+                    if (result.isError) {
+                        const message = result.content?.find(c => c.type === "text")?.text ?? "Unknown error";
+                        showStatus(message, "error");
+                        return;
+                    }
+
+                    const message = result.content?.find(c => c.type === "text")?.text ?? "Model uploaded successfully!";
+                    showStatus(message, "success");
+                    // Hide the upload box
+                    uploadArea.style.display = "none";
+                    fileInput.style.display = "none";
+                    body.style.height = "80px";
+                } catch (error) {
+                    console.error("Upload failed:", error);
+                    showStatus(`Error: ${error.message}`, "error");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        uploadArea.addEventListener("click", () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener("change", (e) => {
+            handleFile(e.target.files[0]);
+        });
+
+        uploadArea.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            uploadArea.classList.add("dragover");
+        });
+
+        uploadArea.addEventListener("dragleave", () => {
+            uploadArea.classList.remove("dragover");
+        });
+
+        uploadArea.addEventListener("drop", (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove("dragover");
+            handleFile(e.dataTransfer.files[0]);
+        });
+
+        await app.connect();
+    </script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+    <style>
+        body { width: 100vw; height: 80vw; margin: 0; padding: 0; overflow: hidden; background-color: rgba(240, 240, 240, 0);}
+        #chart { width: 100vw; height: 100vh; background-color: rgba(240, 240, 240, 0); }
+    </style>
+</head>
+<body>
+    <div id="status">Waiting for data...</div>
+    <div id="chart"></div>
+    <script type="module">
+        import { App } from "https://unpkg.com/@modelcontextprotocol/ext-apps@0.4.0/app-with-deps";
+
+        const app = new App({ name: "Rainfall View", version: "1.0.0" });
+        const statusEl = document.getElementById("status");
+
+        app.ontoolresult = ({ content, isError }) => {
+            console.log("Received tool result:", { content, isError });
+
+            if (isError) {
+                const message = content?.find(c => c.type === "text")?.text ?? "Unknown error";
+                statusEl.textContent = message;
+                return;
+            }
+
+            const chartData = content[0];
+
+            if (!chartData) {
+                statusEl.textContent = JSON.stringify(content);
+                return;
+            }
+
+            try {
+                const data = JSON.parse(chartData.text);
+                Plotly.newPlot("chart", data.data, data.layout, { responsive: true });
+                statusEl.style.display = "none";
+            } catch (error) {
+                console.error("Failed to parse chart data:", error);
+                statusEl.textContent = "Failed to parse chart data.";
+            }
+        };
+
+        await app.connect();
+    </script>
+</body>
+</html>

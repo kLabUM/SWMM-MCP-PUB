@@ -1,7 +1,9 @@
-import webbrowser
 import swmm_api.input_file.section_labels
 from swmm_api.input_file.sections import Storage
+from mcp import types
 from fastmcp import FastMCP
+from fastmcp.server.apps import AppConfig, ResourceCSP
+from fastmcp.tools import ToolResult
 from utils.ModelManager import ModelManager
 from utils.NpEncoder import safe_json
 from swmm_api.input_file import macros as inp_macros
@@ -10,8 +12,6 @@ import io
 import pandas as pd
 import plotly.graph_objects as go
 from utils.logger import tool_logger, log_info
-import time
-from utils.Visualization import VisualizationServer
 from utils.swmm_plotting import plot_network_map, plot_timeseries_generalized
 from utils.design_storm import make_scs_storm
 from prompts import register_prompts
@@ -28,8 +28,10 @@ register_prompts(mcp)
 OUTPUT_NOT_FOUND_MESSAGE = "This resource does not exist. It is possible the simulation has not yet been run or it has not finished yet.\
  Please check the spelling and try again."
 
+VISUALIZATION_VIEW_URI = "ui://swmm-interface/visualization_view.html"
+UPLOAD_VIEW_URI = "ui://swmm-interface/upload_view.html"
+
 mm = ModelManager()
-visual_server = VisualizationServer()
 
 @mcp.tool()
 @tool_logger
@@ -43,6 +45,18 @@ def duplicate_model(model_name: str, new_name: str) -> str:
     """Duplicates a model and returns the new model name. Use this for testing scenarios."""
     mm.duplicate_model(model_name, new_name)
     return new_name
+
+@mcp.tool(app=AppConfig(resource_uri=UPLOAD_VIEW_URI))
+@tool_logger
+def prompt_model_upload() -> str:
+    """Prompts the user with a UI where they can upload a SWMM model."""
+    return "Success"
+
+@mcp.tool(app=AppConfig(visibility=["app"]))
+@tool_logger
+def upload_model(model_name: str, content: str) -> str:
+    """Uploads a new SWMM model to the server. The content should be the full .inp file content."""
+    return mm.upload_model(model_name, content)
 
 @mcp.tool()
 @tool_logger
@@ -226,6 +240,26 @@ def get_report_info(model_name: str, section: str) -> dict | str:
     except Exception as e:
         return safe_json(section_resp)
 
+# ===================================================================================
+#                           VISUALIZATION RESOURCES
+
+@mcp.resource(
+    VISUALIZATION_VIEW_URI,
+    app=AppConfig(csp=ResourceCSP(resource_domains=["https://cdn.plot.ly", "https://unpkg.com"])),
+)
+def visualization_view() -> str:
+    """Interactive visualization viewer."""
+    with open("apps/view.html", "r") as f:
+        return f.read()
+
+@mcp.resource(
+    UPLOAD_VIEW_URI,
+    app=AppConfig(csp=ResourceCSP(resource_domains=["https://unpkg.com"])),
+)
+def upload_view() -> str:
+    """Interactive model upload interface."""
+    with open("apps/upload.html", "r") as f:
+        return f.read()
 
 # ===================================================================================
 #                           MODEL OUTPUT
@@ -250,9 +284,9 @@ def get_output_objects(model_name: str, object_type: str) -> list[str] | str:
         return "This model does not exist. Please check the spelling and try again."
     return model.labels[object_type]
 
-@mcp.tool()
+@mcp.tool(app=AppConfig(resource_uri=VISUALIZATION_VIEW_URI))
 @tool_logger
-def plot_output_data(model_names: list[str], object_type: str, object_label: str, variable: str) -> dict | str:
+def plot_output_data(model_names: list[str], object_type: str, object_label: str, variable: str) -> ToolResult:
     """
     Displays a full timeseries plot to the user.
     Returns a summary of the data.
@@ -263,7 +297,7 @@ def plot_output_data(model_names: list[str], object_type: str, object_label: str
     """
 
     if len(model_names) == 0:
-        return "Please enter at least one model name."
+        return ToolResult(content=[types.TextContent(type="text", text="Please enter at least one model name.")], isError=True)
 
     summary_dict = {}
     fig = go.Figure()
@@ -271,11 +305,11 @@ def plot_output_data(model_names: list[str], object_type: str, object_label: str
     for model_name in model_names:
         model = mm.get(model_name, "out")
         if model is None:
-            return f"Model {model_name} does not exist. Please check the spelling and try again."
+            return ToolResult(content=[types.TextContent(type="text", text=f"Model {model_name} does not exist. Please check the spelling and try again.")], isError=True)
         try:
             data = model.get_part(object_type, object_label, variable)
             if data.empty:
-                return "This object does not exist."
+                return ToolResult(content=[types.TextContent(type="text", text="This object does not exist.")], isError=True)
 
             fig = plot_timeseries_generalized(fig, data, trace_name=model_name)
 
@@ -284,54 +318,81 @@ def plot_output_data(model_names: list[str], object_type: str, object_label: str
 
             summary_dict[model_name] = safe_json(summary.to_frame().to_json(orient="index"))
         except Exception as e:
-            return f"There was an error getting the data: {e}"
+            return ToolResult(content=[types.TextContent(type="text", text=f"There was an error getting the data: {e}")], isError=True)
 
-    visual_server.update_visualization(fig)
-    return summary_dict
+    summary_text = "\n".join([f"{model}: {summary}" for model, summary in summary_dict.items()])
 
+    return ToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=fig.to_json(),
+                _meta={
+                    "chartData": True
+                }
+            ),
+            types.TextContent(
+                type="text",
+                text=f"Output data plotted successfully.\n\nSummary statistics:\n{summary_text}"
+            )
+        ]
+    )
 
-@mcp.tool()
-def plot_model_map(model_name: str) -> str:
+@mcp.tool(app=AppConfig(resource_uri=VISUALIZATION_VIEW_URI))
+def plot_model_map(model_name: str) -> ToolResult:
     """Creates an interactive map of the SWMM model using Plotly and displays it to the user.
     Returns whether the operation was successful."""
 
     model = mm.get(model_name, "inp")
     if model is None:
-        return "This model does not exist. Please check the spelling and try again."
+        return ToolResult(content=[types.TextContent(type="text", text="This model does not exist. Please check the spelling and try again.")], isError=True)
 
     try:
         fig = plot_network_map(model)
-        visual_server.update_visualization(fig)
 
-        return "Map displayed to the user successfully."
+        return ToolResult(
+            content=[
+                types.TextContent(
+                    type="text",
+                    text=fig.to_json(),
+                    _meta={
+                        "chartData": True
+                    }
+                ),
+                types.TextContent(
+                    type="text",
+                    text=f"Model map for '{model_name}' displayed successfully."
+                )
+            ]
+        )
     except Exception as e:
-        return f"Error creating map: {str(e)}"
-
+        return ToolResult(content=[types.TextContent(type="text", text=f"Error creating map: {str(e)}")], isError=True)
 
 # ===================================================================================
 #                           MODEL RAINFALL
-@mcp.tool()
+
+@mcp.tool(app=AppConfig(resource_uri=VISUALIZATION_VIEW_URI))
 @tool_logger
-def plot_rainfall(model_name: str) -> str:
+def plot_rainfall(model_name: str) -> ToolResult:
     """
     Displays a timeseries plot of the model's rainfall to the user.
     Returns the name of the timeseries or an error message.
     """
     model = mm.get(model_name, "inp")
     if model is None:
-        return "This model does not exist. Please check the spelling and try again."
+        return ToolResult(content=[types.TextContent(type="text", text="This model does not exist. Please check the spelling and try again.")], isError=True)
 
     gage = getattr(model, "RAINGAGES", None)
     if gage is None:
-        return "Error: Raingage not found."
+        return ToolResult(content=[types.TextContent(type="text", text="Error: Raingage not found.")], isError=True)
 
     if not gage[list(gage.keys())[0]]["source"] == "TIMESERIES":
-        return f"Error: Only timeseries raingages are supported at this time, not source {gage[list(gage.keys())[0]]["source"]}."
+        return ToolResult(content=[types.TextContent(type="text", text=f"Error: Only timeseries raingages are supported at this time, not source {gage[list(gage.keys())[0]]["source"]}.")], isError=True)
 
     timeseries_name = gage[list(gage.keys())[0]]["timeseries"]
     timeseries = getattr(model, "TIMESERIES", None)
     if timeseries is None:
-        return "Error: Timeseries not found."
+        return ToolResult(content=[types.TextContent(type="text", text="Error: Timeseries not found.")], isError=True)
 
     timeseries = timeseries[timeseries_name]
     timeseries_name = timeseries['name']
@@ -342,9 +403,22 @@ def plot_rainfall(model_name: str) -> str:
 
     fig = go.Figure()
     fig = plot_timeseries_generalized(fig, rainfall_series, x_label="Hours", y_label="Rainfall (inches)")
-    visual_server.update_visualization(fig)
 
-    return timeseries_name
+    return ToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=fig.to_json(),
+                _meta={
+                    "chartData": True
+                }
+            ),
+            types.TextContent(
+                type="text",
+                text=f"Rainfall timeseries '{timeseries_name}' plotted successfully."
+            )
+        ]
+    )
 
 
 @mcp.tool()
@@ -411,16 +485,6 @@ def change_storm(model_name: str, depth: float) -> str:
 
 
 if __name__ == "__main__":
-    stdout = sys.stdout
-    stderr = sys.stderr
-
-    visual_server.start()
-    time.sleep(2) # Wait a moment for the server to start
-    webbrowser.open(f'http://localhost:{visual_server.port}')
-
-    sys.stdout = stdout
-    sys.stderr = stderr
-
     try:
         mcp.run()
     except Exception as e:

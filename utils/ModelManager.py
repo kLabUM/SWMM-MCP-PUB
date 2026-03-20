@@ -16,6 +16,7 @@ current_model = {
 
 class ModelManager:
     def __init__(self):
+        self.MODELS_DIRECTORY = MODELS_DIRECTORY
         # Get a list of models
         self._fetch_models()
         self._editable_models = []
@@ -48,6 +49,46 @@ class ModelManager:
         self._fetch_models()
         self._editable_models.append(new_name)
         return new_name
+
+    def upload_model(self, model_name: str, content: str) -> str:
+        """
+        Uploads a new SWMM model to the server.
+        Returns success message or error description.
+        """
+        if not model_name:
+            return "Error: Model name cannot be empty."
+
+        if not content:
+            return "Error: Model content cannot be empty."
+
+        # Sanitize model name to prevent directory traversal
+        model_name = model_name.replace("/", "_").replace("\\", "_").replace("..", "_")
+
+        self._fetch_models()
+
+        # Check if model already exists
+        if model_name in self.__models:
+            return f"Error: Model '{model_name}' already exists. Please choose a different name."
+
+        file_path = os.path.join(MODELS_DIRECTORY, model_name + ".inp")
+
+        try:
+            with open(file_path, 'w') as f:
+                f.write(content)
+
+            # Validate the file by trying to load it
+            SwmmInput(file_path)
+
+            self._fetch_models()
+            #self._editable_models.append(model_name) # Gonna keep it non-editable
+            log_info(f"Successfully uploaded model: {model_name}")
+            return f"Successfully uploaded model '{model_name}'. The model is now available for use."
+        except Exception as e:
+            # If validation fails, remove the file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            log_info(f"Failed to upload model {model_name}: {str(e)}")
+            return f"Error: Failed to upload model. The file may not be a valid SWMM input file. Details: {str(e)}"
 
     def get(self, model_name, file) -> SwmmInput | SwmmOutput | SwmmReport | None:
         """Returns the requested file for the given model."""

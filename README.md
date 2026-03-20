@@ -65,10 +65,15 @@ You are an expert SWMM (Storm Water Management Model) assistant. You have access
 | `get_report_info` | Returns the contents of a section of the report file for a given model.                                                                                     |
 | `get_output_variables` | Returns a list of variables in the output file for a given model.                                                                                           |
 | `get_output_objects` | Returns a list of objects in the output file for a given model and object type.                                                                             |
+| `change_storm` | Modify the model's storm event to an 24-hour SCS Type 2 design storm of a given depth.                                                                      |
+
+### Apps
+| App | Description                                                                                                                                                 |
+| --- |-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `prompt_model_upload` | Prompts the user with a UI where they can upload a SWMM model.                                                                                              |
 | `plot_output_data` | Displays a full timeseries plot to the user.                                                                                |
 | `plot_model_map` | Creates an interactive map of the SWMM model and displays it to the user.                          |
 | `plot_rainfall` | Displays a timeseries plot of the model's rainfall to the user.                                 |
-| `change_storm` | Modify the model's storm event to an 24-hour SCS Type 2 design storm of a given depth.                                                                      |
 
 ### Prompts
 | Name | Description |

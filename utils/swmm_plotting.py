@@ -162,8 +162,8 @@ def plot_network_map(input_file: str) -> go.Figure:
         title='SWMM Network Map',  # Changed to "Map" instead of "Layout"
         showlegend=True,
         hovermode='closest',
-        plot_bgcolor='rgba(0,0,0,0)',  # Transparent background
-        paper_bgcolor='rgba(0,0,0,0)',  # Transparent padding
+        paper_bgcolor="rgb(245, 244, 237)",
+        plot_bgcolor="rgb(245, 244, 237)",
         xaxis=dict(
             title='',  # Removed axis title since it's a map
             showgrid=False,  # Remove gridlines
@@ -214,7 +214,7 @@ def plot_network_map(input_file: str) -> go.Figure:
                 align='left'
             )
         ],
-        margin=dict(r=200)
+        margin=dict(r=100)
     )
     
     return fig
@@ -403,7 +403,9 @@ def plot_timeseries_generalized(fig: go.Figure, series: pd.Series, x_label = Non
         xaxis_title=x_label,
         yaxis_title=y_label,
         hovermode='x unified',
-        showlegend=True
+        showlegend=True,
+        paper_bgcolor="rgb(245, 244, 237)",
+        plot_bgcolor="rgb(245, 244, 237)",
     )
 
     return fig
