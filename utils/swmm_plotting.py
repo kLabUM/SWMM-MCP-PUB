@@ -365,7 +365,7 @@ def plot_node_timeseries(output_file: str,
 
 
 
-def plot_timeseries_generalized(fig: go.Figure, series: pd.Series, x_label = None, y_label = None, trace_name = str) -> go.Figure:
+def plot_timeseries_generalized(fig: go.Figure, series: pd.Series, x_label = None, y_label = None, trace_name = None) -> go.Figure:
     """
     Create an interactive plot from a generic pandas Series.
 

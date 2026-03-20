@@ -1,8 +1,9 @@
 import webbrowser
 import swmm_api.input_file.section_labels
+from swmm_api.input_file.sections import Storage
 from fastmcp import FastMCP
-from utils.model_manager import ModelManager
-from utils.numpy_encoder import safe_json
+from utils.ModelManager import ModelManager
+from utils.NpEncoder import safe_json
 from swmm_api.input_file import macros as inp_macros
 import sys
 import io
@@ -10,9 +11,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from utils.logger import tool_logger, log_info
 import time
-from utils.visualization_server import VisualizationServer
+from utils.Visualization import VisualizationServer
 from utils.swmm_plotting import plot_network_map, plot_timeseries_generalized
 from utils.design_storm import make_scs_storm
+from prompts import register_prompts
 
 mcp = FastMCP(
     name="SWMM-Interface",
@@ -21,11 +23,13 @@ mcp = FastMCP(
     """
 )
 
+register_prompts(mcp)
+
 OUTPUT_NOT_FOUND_MESSAGE = "This resource does not exist. It is possible the simulation has not yet been run or it has not finished yet.\
  Please check the spelling and try again."
 
 mm = ModelManager()
-visual_server = None
+visual_server = VisualizationServer()
 
 @mcp.tool()
 @tool_logger
@@ -35,14 +39,14 @@ def list_models() -> list[str]:
 
 @mcp.tool()
 @tool_logger
-def duplicate_model(model_name: str, new_name) -> str:
+def duplicate_model(model_name: str, new_name: str) -> str:
     """Duplicates a model and returns the new model name. Use this for testing scenarios."""
     mm.duplicate_model(model_name, new_name)
     return new_name
 
 @mcp.tool()
 @tool_logger
-def model_info(model_name) -> dict | str:
+def get_model_info(model_name: str) -> dict | str:
     """Returns general information about a model. Be sure to enter the model name exactly as it appears in the list."""
     model = mm.get(model_name, "inp")
     if model is None:
@@ -64,10 +68,10 @@ def model_info(model_name) -> dict | str:
 
 
 # ==============================================================================
-#                             INPUT FILE
+#                             INPUT FILE STUFF
 @mcp.tool()
 @tool_logger
-def get_model_sections(model_name: str):
+def get_input_sections(model_name: str):
     """Returns a list of sections in the input file for a given model. """
     model = mm.get(model_name, "inp")
     if model is None:
@@ -76,10 +80,10 @@ def get_model_sections(model_name: str):
 
 @mcp.tool()
 @tool_logger
-def input_file_info(model_name: str, section: str) -> dict | str:
+def get_input_info(model_name: str, section: str) -> dict | str:
     """
     Returns the contents of a section of the input file for a given model.
-    Do NOT include brackets in the section name. Refer to the tool get_model_sections for a list of sections.
+    Do NOT include brackets in the section name. Refer to the tool get_input_sections for a list of sections.
 
     """
     model = mm.get(model_name, "inp")
@@ -98,13 +102,94 @@ def input_file_info(model_name: str, section: str) -> dict | str:
     except Exception as e:
         return safe_json(section_resp)
 
-# ===================================================================================
-#                              RUN MODEL
+
 @mcp.tool()
 @tool_logger
-def run_model(model_name: str):
+def add_storage(model_name: str, junction_name: str, storage_volume_cuft: float, initial_depth: float = 0, max_depth: float = None) -> str:
+    """
+    Replace a junction with a cylindrical storage node of specified volume. Unless specified, it will start empty. Returns success message or error description.
+    """
+    if model_name is None or junction_name is None or storage_volume_cuft is None:
+        return "Missing required input parameters. Please provide model_name, junction_name, and storage_volume_cuft."
+    if storage_volume_cuft <= 0:
+        return "Storage volume must be greater than zero."
+
+    model = mm.get(model_name, "inp")
+    if model is None:
+        return "This model does not exist. Please check the spelling and try again."
+
+    junctions = getattr(model, "JUNCTIONS", None)
+    if junctions is None or junction_name not in junctions:
+        return f"Junction '{junction_name}' does not exist in model '{model_name}'."
+    # Safe to go through with the conversion
+
+    if getattr(model, "STORAGE", None) is None:
+        model.STORAGE = Storage.create_section()
+
+    junction_elevation = junctions[junction_name]["elevation"]
+    junction_depth_max = junctions[junction_name]["depth_max"]
+
+    if max_depth is not None:
+        junction_depth_max = max_depth
+
+    surface_area = storage_volume_cuft / junction_depth_max
+
+    # Keep the same name to keep conduits connected.
+    new_storage = Storage(name=junction_name, elevation=junction_elevation, depth_max=junction_depth_max,
+                                  depth_init=initial_depth, kind=Storage.TYPES.FUNCTIONAL, data=[surface_area, 0, 0])
+    model.STORAGE.add_obj(new_storage)
+
+    del model["JUNCTIONS"][junction_name]
+
+    try:
+        mm.update_inp(model_name, model)
+    except ValueError as er:
+        return f"Error updating model: {er}"
+
+    return f"Successfully added {new_storage}"
+
+@mcp.tool()
+@tool_logger
+def change_conduit(model_name: str, conduit_name: str, new_diameter: float) -> str:
+    """Changes the diameter of a circular conduit in the model."""
+    if new_diameter < 0:
+        return "Diameter must be at least zero."
+
+    model = mm.get(model_name, "inp")
+    if model is None:
+        return "This model does not exist. Please check the spelling and try again."
+
+    conduits = getattr(model, "XSECTIONS", None)
+    if conduits is None or conduit_name not in conduits:
+        return f"Junction '{conduit_name}' does not exist in model '{model_name}'."
+
+    # Assert circular shape
+    if model["XSECTIONS"][conduit_name].shape != "CIRCULAR":
+        return f"Conduit '{conduit_name}' is not circular. Only circular conduits are supported."
+
+    model["XSECTIONS"][conduit_name].height = new_diameter
+
+    try:
+        mm.update_inp(model_name, model)
+    except ValueError as er:
+        return f"Error updating model: {er}"
+
+    return f"Successfully changed conduit {conduit_name} in model {model_name}"
+
+# ===================================================================================
+#                              RUN MODEL
+@mcp.tool(task=True)
+@tool_logger
+async def run_model(model_name: str):
     """Runs a model."""
-    res = mm.run_model(model_name)
+    stdout = sys.stdout
+    stderr = sys.stderr
+
+    sys.stdout = sys.stderr
+    res = await mm.run_model(model_name)
+
+    sys.stdout = stdout
+    sys.stderr = stderr
     return res
 
 
@@ -126,7 +211,7 @@ def get_report_sections(model_name: str) -> list[str] | str:
 
 @mcp.tool()
 @tool_logger
-def get_report_file_info(model_name: str, section: str) -> dict | str:
+def get_report_info(model_name: str, section: str) -> dict | str:
     """Returns the contents of a section of the report file for a given model. """
     model = mm.get(model_name, "rpt")
     if model is None:
@@ -146,7 +231,7 @@ def get_report_file_info(model_name: str, section: str) -> dict | str:
 #                           MODEL OUTPUT
 @mcp.tool()
 @tool_logger
-def get_model_output_variables(model_name: str) -> dict | str:
+def get_output_variables(model_name: str) -> dict | str:
     """Returns a list of variables in the output file for a given model. """
     model = mm.get(model_name, "out")
     if model is None:
@@ -155,7 +240,7 @@ def get_model_output_variables(model_name: str) -> dict | str:
 
 @mcp.tool()
 @tool_logger
-def get_model_output_objects(model_name: str, object_type: str) -> list[str] | str:
+def get_output_objects(model_name: str, object_type: str) -> list[str] | str:
     """
     Returns a list of objects in the output file for a given model and object type.
     object_type: the type of object to return. E.g. "node", "link", "subcatchment". Refer to the tool "model_output_variables" for a list of types.
@@ -167,14 +252,14 @@ def get_model_output_objects(model_name: str, object_type: str) -> list[str] | s
 
 @mcp.tool()
 @tool_logger
-def plot_model_output_data(model_names: list[str], object_type: str, object_label: str, variable: str) -> dict | str:
+def plot_output_data(model_names: list[str], object_type: str, object_label: str, variable: str) -> dict | str:
     """
     Displays a full timeseries plot to the user.
     Returns a summary of the data.
     model_names: List of model names to plot.
-    object_type: the type of object to return. E.g. "node", "link", "subcatchment". Refer to the tool "model_output_variables" for a list of types.
+    object_type: the type of object to return. E.g. "node", "link", "subcatchment". Refer to the tool "get_output_variables" for a list of types.
     object_label: the label of the object in the output file. E.g. "J1", "S1"
-    variable: the variable to return. E.g. "flow". Refer to the tool "model_output_variables" for a list of variables.
+    variable: the variable to return. E.g. "flow". Refer to the tool "get_output_variables" for a list of variables.
     """
 
     if len(model_names) == 0:
@@ -285,6 +370,16 @@ def change_storm(model_name: str, depth: float) -> str:
     timeseries = make_scs_storm(depth)
     new_storm_name = f"SCS_24H_TYPE_II_{depth}IN"
 
+    """
+    Editing the model:
+    1) Clear the timeseries section
+    2) Add the new timeseries
+    3) Edit every rain gage to
+        1) Use this new timeseries
+        2) Have a form of "VOLUME"
+        3) Use an interval of "0:15" (15 minutes)
+    """
+
     # make tuple of time, rainfall
     timeseries_tuples = []
     for _, row in timeseries.iterrows():
@@ -307,19 +402,18 @@ def change_storm(model_name: str, depth: float) -> str:
             gages[gage]["interval"] = "0:15"
             gages[gage]["units"] = "IN"
 
-    mm.update_inp(model_name, model)
+    try:
+        mm.update_inp(model_name, model)
+    except ValueError as er:
+        return f"Error updating model: {er}"
+
     return new_storm_name
 
 
 if __name__ == "__main__":
-    # Clear the log file.
-    with open("server.log", "w") as f:
-        f.write("")
-
     stdout = sys.stdout
     stderr = sys.stderr
 
-    visual_server = VisualizationServer()
     visual_server.start()
     time.sleep(2) # Wait a moment for the server to start
     webbrowser.open(f'http://localhost:{visual_server.port}')

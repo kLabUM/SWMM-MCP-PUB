@@ -10,7 +10,7 @@ uv sync
 ```
 
 ## Usage
-Put the following json block into an MCP client (e.g. Claude Desktop).
+Put the following json block into an MCP client (e.g. Claude Desktop). Though, some clients may have a different interface for configuring MCP servers.
 If you are currently in the root folder of this project in your IDE, you can find your full directory path by entering the command `pwd`.
 ```json
 {
@@ -27,7 +27,7 @@ If you are currently in the root folder of this project in your IDE, you can fin
   }
 }
 ```
-On windows it might look something like this:
+On Windows it may look something like this:
 ```json
 {
   "mcpServers": {
@@ -36,7 +36,7 @@ On windows it might look something like this:
       "args": [
         "run",
         "--directory",
-        "C:\\path\\to\\directory\\SWMM-MCP",
+        "C:\\Users\\Jacob\\Documents\\SWMM-MCP",
         "server.py"
       ]
     }
@@ -44,41 +44,54 @@ On windows it might look something like this:
 }
 ```
 
-If your client lets you use a system prompt, this has been working somewhat well.
+Example system prompt if allowed by your client:
 ```
-You are an expert stormwater modeler specializing in EPA SWMM. You must use available tools to help users understand their 
-models and interpret results. When the user asks a question, first identify which tools would be most helpful before proceeding.
-Explain technical terms and provide context for results. 
-Be friendly, helpful, and concise. End responses with 2-3 specific follow-up suggestions based on the analysis.
+You are an expert SWMM (Storm Water Management Model) assistant. You have access to tools to inspect and analyze SWMM models. Use the available tools to answer questions accurately.
 ```
 
-## Development
-To test a tool without actually using an LLM, you can use the utility in `test.py`. Specify the following variables and run it either through an IDE, or with `uv run test.py`.
-```python
-# server.py : function to test
-@mcp.tool()
-def model_info(model_name):
-    pass
+## Inventory
+### Tools
+| Tool | Description                                                                                                                                                 |
+| --- |-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_models` | Returns a list of available models in the server.                                                                                                           |
+| `duplicate_model` | Duplicates a model and returns the new model name. Useful for testing scenarios.                                                                        |
+| `get_model_info` | Returns general information about a model.                                           |
+| `get_input_sections` | Returns a list of sections in the input file for a given model.                                                                                             |
+| `get_input_info` | Returns the contents of a section of the input file for a given model. |
+| `add_storage` | Replace a junction with a cylindrical storage node of specified volume.  |
+| `change_conduit` | Changes the diameter of a circular conduit in the model.                                                                                                    |
+| `run_model` | Runs a model.                                                                                                                                               |
+| `get_report_sections` | Returns a list of sections in the report file for a given model.                                                                                            |
+| `get_report_info` | Returns the contents of a section of the report file for a given model.                                                                                     |
+| `get_output_variables` | Returns a list of variables in the output file for a given model.                                                                                           |
+| `get_output_objects` | Returns a list of objects in the output file for a given model and object type.                                                                             |
+| `plot_output_data` | Displays a full timeseries plot to the user.                                                                                |
+| `plot_model_map` | Creates an interactive map of the SWMM model and displays it to the user.                          |
+| `plot_rainfall` | Displays a timeseries plot of the model's rainfall to the user.                                 |
+| `change_storm` | Modify the model's storm event to an 24-hour SCS Type 2 design storm of a given depth.                                                                      |
 
-# in test.py:  
-tool_name = "model_info"
-tool_parameters = {
-    "model_name": "base_model"
-}
-```
-
-
-To add a new python package, use the command:
-```
-uv add <package name>
-```
-This will take care of updating pyproject.toml and the lock file, keeping all of our environments on the same page.
+### Prompts
+| Name | Description |
+| --- | --- |
+| `list_models` | Which models are available? |
+| `describe_model` | Tell me about the model. |
+| `get_pipes_and_junctions` | How many pipes and junctions does it have? |
+| `largest_pipe` | What's the largest pipe in the network? |
+| `show_network` | Show me my network |
+| `run_model` | Run a model for me |
+| `compare_flow_largest_pipe` | Compare flow through the largest pipe for a 2-inch vs 4-inch storm. |
+| `nodes_flood_4_inch` | Which nodes flood under a 4-inch storm? |
+| `detention_recommendations` | Suggest detention locations to reduce downstream flooding. |
+| `add_storage_and_rerun` | Add a storage unit at a node and rerun. |
+| `node_flow_timeseries` | Show node flow during the simulation. |
+| `compare_base_to_modified` | Compare base and modified scenarios. |
+| `outfall_hydrograph_comparison` | Plot base vs. modified outfall hydrographs. |
 
 
 ## Troubleshooting
 
 ### Adding server to client failure
-For mac users, you may run into an issue of the client being unable to find the path uv is installed. To resolve this issue, you can create a symlink to one of the paths the client already checks. 
+For macOS users, you may run into an issue of the client being unable to find the path uv is installed. To resolve this issue, you can create a symlink to one of the paths the client already checks. 
 
 To first find where uv is installed, in your terminal run:
 
